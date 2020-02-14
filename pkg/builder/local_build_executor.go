@@ -131,20 +131,22 @@ func (be *localBuildExecutor) uploadTree(ctx context.Context, outputDirectory fi
 	return treeDigest, err
 }
 
-func (be *localBuildExecutor) createOutputParentDirectory(buildDirectory filesystem.Directory, outputParentPath string) (filesystem.Directory, error) {
+func (be *localBuildExecutor) createOutputParentDirectory(workingDirectory filesystem.Directory, outputParentPath string) (filesystem.Directory, error) {
+	// REv2 states that output directories must be created relative
+	// to the working directory.
 	// Create and enter successive components, closing the former.
 	components := strings.FieldsFunc(outputParentPath, func(r rune) bool { return r == '/' })
-	d := buildDirectory
+	d := workingDirectory
 	for n, component := range components {
 		if component != "." {
 			if err := d.Mkdir(component, 0777); err != nil && !os.IsExist(err) {
-				if d != buildDirectory {
+				if d != workingDirectory {
 					d.Close()
 				}
 				return nil, util.StatusWrapf(err, "Failed to create output directory %#v", path.Join(components[:n+1]...))
 			}
 			d2, err := d.Enter(component)
-			if d != buildDirectory {
+			if d != workingDirectory {
 				d.Close()
 			}
 			if err != nil {
@@ -236,6 +238,10 @@ func (be *localBuildExecutor) Execute(ctx context.Context, filePool re_filesyste
 		return response
 	}
 
+	workingDirectory, err := filesystem.NewLocalDirectory(command.WorkingDirectory)
+	if err != nil {
+		workingDirectory = buildDirectory
+	}
 	// Create and open parent directories of where we expect to see output.
 	// Build rules generally expect the parent directories to already be
 	// there. We later use the directory handles to extract output files.
@@ -243,7 +249,7 @@ func (be *localBuildExecutor) Execute(ctx context.Context, filePool re_filesyste
 	for _, outputDirectory := range command.OutputDirectories {
 		dirPath := path.Dir(outputDirectory)
 		if _, ok := outputParentDirectories[dirPath]; !ok {
-			dir, err := be.createOutputParentDirectory(buildDirectory, dirPath)
+			dir, err := be.createOutputParentDirectory(workingDirectory, dirPath)
 			if err != nil {
 				attachErrorToExecuteResponse(response, err)
 				return response
@@ -279,7 +285,7 @@ func (be *localBuildExecutor) Execute(ctx context.Context, filePool re_filesyste
 	for _, outputFile := range command.OutputFiles {
 		dirPath := path.Dir(outputFile)
 		if _, ok := outputParentDirectories[dirPath]; !ok {
-			dir, err := be.createOutputParentDirectory(buildDirectory, dirPath)
+			dir, err := be.createOutputParentDirectory(workingDirectory, dirPath)
 			if err != nil {
 				attachErrorToExecuteResponse(response, err)
 				return response
